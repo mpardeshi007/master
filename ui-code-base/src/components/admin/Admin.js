@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   FaCog, FaUsers, FaUserShield, FaKey, FaLock, FaUnlock,
   FaEdit, FaTrash, FaPlus, FaSearch, FaFilter, FaDownload,
@@ -11,6 +11,8 @@ import {
   FaToggleOn, FaToggleOff, FaWarehouse, FaNetworkWired, FaUserCheck,
   FaUser
 } from 'react-icons/fa';
+import monitoringService from '../../services/monitoringService';
+import TrafficAnalytics from './TrafficAnalytics';
 import './Admin.css';
 
 const Admin = () => {
@@ -22,6 +24,23 @@ const Admin = () => {
   const [selectedUser, setSelectedUser] = useState(null);
   const [isEditingUser, setIsEditingUser] = useState(false);
   const [isAddingUser, setIsAddingUser] = useState(false);
+  
+  // Monitoring state
+  const [apiEndpoints, setApiEndpoints] = useState([]);
+  const [apiLogs, setApiLogs] = useState([]);
+  const [systemMetrics, setSystemMetrics] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [selectedService, setSelectedService] = useState(null);
+  const [showServiceModal, setShowServiceModal] = useState(false);
+  const [newService, setNewService] = useState({
+    serviceId: '',
+    serviceName: '',
+    endpoint: '',
+    provider: '',
+    version: '',
+    environment: 'production'
+  });
 
   // Mock users data
   const [users, setUsers] = useState([
@@ -113,11 +132,143 @@ const Admin = () => {
     }
   });
 
-  // Mock API monitoring data
-  const [apiEndpoints] = useState([
+  // Load monitoring data when component mounts or view changes
+  useEffect(() => {
+    if (currentView === 'api-monitoring') {
+      loadMonitoringData();
+    }
+  }, [currentView]);
+
+  // Auto-refresh monitoring data every 30 seconds
+  useEffect(() => {
+    if (currentView === 'api-monitoring') {
+      const interval = setInterval(loadMonitoringData, 30000);
+      return () => clearInterval(interval);
+    }
+  }, [currentView]);
+
+  const loadMonitoringData = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      console.log('Loading monitoring data...');
+      
+      // Load services first
+      const services = await monitoringService.getAllServices();
+      console.log('Services loaded:', services);
+      setApiEndpoints(services);
+      
+      // Load logs
+      const logs = await monitoringService.getApiLogs(50);
+      console.log('Logs loaded:', logs);
+      setApiLogs(logs);
+      
+      // Load metrics
+      const metrics = await monitoringService.getSystemMetrics();
+      console.log('Metrics loaded:', metrics);
+      setSystemMetrics(metrics);
+      
+    } catch (err) {
+      console.error('Monitoring data load error:', err);
+      
+      // Check if it's a network error (backend not running)
+      if (err.message.includes('Failed to fetch') || err.message.includes('NetworkError')) {
+        setError('Backend server is not running. Please start the Spring Boot application first.');
+      } else {
+        setError('Failed to load monitoring data: ' + err.message);
+      }
+      
+      // Set empty arrays to show no data instead of fallback
+      setApiEndpoints([]);
+      setApiLogs([]);
+      setSystemMetrics({});
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleTestConnection = async (serviceId) => {
+    try {
+      await monitoringService.testServiceConnection(serviceId);
+      // Refresh data after test
+      loadMonitoringData();
+    } catch (err) {
+      setError('Failed to test connection: ' + err.message);
+    }
+  };
+
+  const handleResetMetrics = async (serviceId) => {
+    try {
+      await monitoringService.resetServiceMetrics(serviceId);
+      // Refresh data after reset
+      loadMonitoringData();
+    } catch (err) {
+      setError('Failed to reset metrics: ' + err.message);
+    }
+  };
+
+  const handleViewLogs = async (serviceId) => {
+    try {
+      setLoading(true);
+      const logs = await monitoringService.getServiceLogs(serviceId);
+      setApiLogs(logs);
+    } catch (err) {
+      setError('Failed to load service logs: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleExportLogs = async (format = 'json') => {
+    try {
+      const result = await monitoringService.exportLogs(format);
+      // Create download link
+      const blob = new Blob([result], { type: 'application/json' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `api-logs-${new Date().toISOString().split('T')[0]}.${format}`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      setError('Failed to export logs: ' + err.message);
+    }
+  };
+
+  const handleAddService = async () => {
+    try {
+      await monitoringService.registerService(newService);
+      setShowServiceModal(false);
+      setNewService({
+        serviceId: '',
+        serviceName: '',
+        endpoint: '',
+        provider: '',
+        version: '',
+        environment: 'production'
+      });
+      loadMonitoringData();
+    } catch (err) {
+      setError('Failed to add service: ' + err.message);
+    }
+  };
+
+  const handleRemoveService = async (serviceId) => {
+    if (window.confirm('Are you sure you want to remove this service?')) {
+      try {
+        await monitoringService.unregisterService(serviceId);
+        loadMonitoringData();
+      } catch (err) {
+        setError('Failed to remove service: ' + err.message);
+      }
+    }
+  };
+
+  // Fallback data for when API is not available
+  const fallbackApiEndpoints = [
     {
-      id: 'API001',
-      name: 'Fund Price Service',
+      serviceId: 'API001',
+      serviceName: 'Fund Price Service',
       endpoint: '/api/v1/funds/prices',
       status: 'healthy',
       responseTime: 145,
@@ -128,8 +279,8 @@ const Admin = () => {
       provider: 'MarketData Corp'
     },
     {
-      id: 'API002',
-      name: 'Bank Integration',
+      serviceId: 'API002',
+      serviceName: 'Bank Integration',
       endpoint: '/api/v1/bank/transactions',
       status: 'warning',
       responseTime: 2340,
@@ -140,8 +291,8 @@ const Admin = () => {
       provider: 'BankConnect API'
     },
     {
-      id: 'API003',
-      name: 'KYC Verification',
+      serviceId: 'API003',
+      serviceName: 'KYC Verification',
       endpoint: '/api/v1/kyc/verify',
       status: 'error',
       responseTime: 0,
@@ -152,8 +303,8 @@ const Admin = () => {
       provider: 'IdentityCheck Inc'
     },
     {
-      id: 'API004',
-      name: 'Regulatory Reporting',
+      serviceId: 'API004',
+      serviceName: 'Regulatory Reporting',
       endpoint: '/api/v1/reports/regulatory',
       status: 'healthy',
       responseTime: 567,
@@ -163,11 +314,11 @@ const Admin = () => {
       errorRate: 0.1,
       provider: 'RegTech Solutions'
     }
-  ]);
+  ];
 
-  const [apiLogs] = useState([
+  const fallbackApiLogs = [
     {
-      id: 'LOG001',
+      logId: 'LOG001',
       timestamp: '2024-02-15T11:45:23Z',
       endpoint: '/api/v1/kyc/verify',
       method: 'POST',
@@ -179,7 +330,7 @@ const Admin = () => {
       severity: 'error'
     },
     {
-      id: 'LOG002',
+      logId: 'LOG002',
       timestamp: '2024-02-15T11:44:15Z',
       endpoint: '/api/v1/bank/transactions',
       method: 'GET',
@@ -191,7 +342,7 @@ const Admin = () => {
       severity: 'warning'
     },
     {
-      id: 'LOG003',
+      logId: 'LOG003',
       timestamp: '2024-02-15T11:43:07Z',
       endpoint: '/api/v1/funds/prices',
       method: 'GET',
@@ -202,7 +353,7 @@ const Admin = () => {
       ipAddress: '192.168.1.67',
       severity: 'info'
     }
-  ]);
+  ];
 
   // Helper functions
   const formatDate = (dateString) => {
@@ -645,40 +796,94 @@ const Admin = () => {
   };
 
   const renderAPIMonitoring = () => {
+    // Use real data only - remove fallback to force real data loading
+    const services = apiEndpoints;
+    const logs = apiLogs;
+
     return (
       <div className="admin-section">
         <div className="section-header">
           <h2><FaNetworkWired /> API Monitoring</h2>
           <p>Monitor integration health, performance, and error tracking</p>
+          <div className="header-actions">
+            <button 
+              className="btn btn-secondary" 
+              onClick={loadMonitoringData}
+              disabled={loading}
+            >
+              <FaSync /> {loading ? 'Loading...' : 'Refresh Data'}
+            </button>
+            <button 
+              className="btn btn-secondary" 
+              onClick={() => handleExportLogs('json')}
+            >
+              <FaDownload /> Export Logs
+            </button>
+            <button 
+              className="btn btn-primary" 
+              onClick={() => setShowServiceModal(true)}
+            >
+              <FaPlus /> Add Service
+            </button>
+          </div>
         </div>
+
+        {error && (
+          <div className="error-message">
+            <FaExclamationTriangle /> {error}
+            <button onClick={() => setError(null)} className="close-error">
+              <FaTimes />
+            </button>
+          </div>
+        )}
+
+        {loading && (
+          <div className="loading-message">
+            <FaSync className="spinning" /> Loading monitoring data...
+          </div>
+        )}
 
         <div className="api-stats">
           <div className="stat-card healthy">
-            <div className="stat-value">{apiEndpoints.filter(api => api.status === 'healthy').length}</div>
+            <div className="stat-value">{services.filter(api => api.status === 'healthy').length}</div>
             <div className="stat-label">Healthy APIs</div>
           </div>
           <div className="stat-card warning">
-            <div className="stat-value">{apiEndpoints.filter(api => api.status === 'warning').length}</div>
+            <div className="stat-value">{services.filter(api => api.status === 'warning').length}</div>
             <div className="stat-label">Warning Status</div>
           </div>
           <div className="stat-card error">
-            <div className="stat-value">{apiEndpoints.filter(api => api.status === 'error').length}</div>
+            <div className="stat-value">{services.filter(api => api.status === 'error').length}</div>
             <div className="stat-label">Error Status</div>
           </div>
           <div className="stat-card">
             <div className="stat-value">
-              {(apiEndpoints.reduce((sum, api) => sum + api.responseTime, 0) / apiEndpoints.length).toFixed(0)}ms
+              {services.length > 0 ? 
+                (services.reduce((sum, api) => sum + api.responseTime, 0) / services.length).toFixed(0) : 0}ms
             </div>
             <div className="stat-label">Avg Response Time</div>
           </div>
         </div>
 
         <div className="api-endpoints-grid">
-          {apiEndpoints.map(api => (
-            <div key={api.id} className={`api-card ${api.status}`}>
+          {services.length === 0 && !loading ? (
+            <div className="empty-state">
+              <FaNetworkWired className="empty-icon" />
+              <h3>No Services Found</h3>
+              <p>No services are currently registered for monitoring.</p>
+              <button 
+                className="btn btn-primary" 
+                onClick={() => setShowServiceModal(true)}
+              >
+                <FaPlus /> Add Your First Service
+              </button>
+            </div>
+          ) : (
+            services.map(api => (
+            <div key={api.serviceId} className={`api-card ${api.status}`}>
               <div className="api-header">
                 <div className="api-name">
-                  <h4>{api.name}</h4>
+                  <h4>{api.serviceName}</h4>
                   <span className="api-endpoint">{api.endpoint}</span>
                 </div>
                 <div className="api-status">
@@ -723,18 +928,47 @@ const Admin = () => {
                   <span className="meta-label">Last Check:</span>
                   <span className="meta-value">{formatDate(api.lastCheck)}</span>
                 </div>
+                {api.version && (
+                  <div className="meta-item">
+                    <span className="meta-label">Version:</span>
+                    <span className="meta-value">{api.version}</span>
+                  </div>
+                )}
               </div>
 
               <div className="api-actions">
-                <button className="btn btn-secondary">
+                <button 
+                  className="btn btn-secondary"
+                  onClick={() => handleViewLogs(api.serviceId)}
+                  title="View Service Logs"
+                >
                   <FaEye /> View Logs
                 </button>
-                <button className="btn btn-primary">
+                <button 
+                  className="btn btn-primary"
+                  onClick={() => handleTestConnection(api.serviceId)}
+                  title="Test Service Connection"
+                >
                   <FaSync /> Test Connection
+                </button>
+                <button 
+                  className="btn btn-warning"
+                  onClick={() => handleResetMetrics(api.serviceId)}
+                  title="Reset Service Metrics"
+                >
+                  <FaUndo /> Reset
+                </button>
+                <button 
+                  className="btn btn-danger"
+                  onClick={() => handleRemoveService(api.serviceId)}
+                  title="Remove Service"
+                >
+                  <FaTrash />
                 </button>
               </div>
             </div>
-          ))}
+          ))
+          )}
         </div>
 
         <div className="api-logs-section">
@@ -753,8 +987,18 @@ const Admin = () => {
                 </tr>
               </thead>
               <tbody>
-                {apiLogs.map(log => (
-                  <tr key={log.id} className={log.severity}>
+                {logs.length === 0 && !loading ? (
+                  <tr>
+                    <td colSpan="7" className="empty-logs">
+                      <div className="empty-state">
+                        <FaHistory className="empty-icon" />
+                        <p>No API logs found</p>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  logs.map(log => (
+                  <tr key={log.logId} className={log.severity}>
                     <td>{formatDate(log.timestamp)}</td>
                     <td>
                       <div className="endpoint-cell">
@@ -794,13 +1038,18 @@ const Admin = () => {
                         <button className="btn-icon" title="View Details">
                           <FaEye />
                         </button>
-                        <button className="btn-icon" title="Download Log">
+                        <button 
+                          className="btn-icon" 
+                          title="Download Log"
+                          onClick={() => handleExportLogs('json')}
+                        >
                           <FaDownload />
                         </button>
                       </div>
                     </td>
                   </tr>
-                ))}
+                ))
+                )}
               </tbody>
             </table>
           </div>
@@ -848,13 +1097,110 @@ const Admin = () => {
         >
           <FaNetworkWired /> API Monitoring
         </button>
+        <button 
+          className={`nav-tab ${currentView === 'traffic-analytics' ? 'active' : ''}`}
+          onClick={() => setCurrentView('traffic-analytics')}
+        >
+          <FaChartLine /> Traffic Analytics
+        </button>
       </div>
 
       <div className="admin-content">
         {currentView === 'user-management' && renderUserManagement()}
         {currentView === 'system-settings' && renderSystemSettings()}
         {currentView === 'api-monitoring' && renderAPIMonitoring()}
+        {currentView === 'traffic-analytics' && <TrafficAnalytics />}
       </div>
+
+      {/* Service Registration Modal */}
+      {showServiceModal && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <div className="modal-header">
+              <h3>Add New Service</h3>
+              <button 
+                className="modal-close" 
+                onClick={() => setShowServiceModal(false)}
+              >
+                <FaTimes />
+              </button>
+            </div>
+            <div className="modal-body">
+              <div className="form-group">
+                <label>Service ID:</label>
+                <input
+                  type="text"
+                  value={newService.serviceId}
+                  onChange={(e) => setNewService({...newService, serviceId: e.target.value})}
+                  placeholder="e.g., NEW_SERVICE"
+                />
+              </div>
+              <div className="form-group">
+                <label>Service Name:</label>
+                <input
+                  type="text"
+                  value={newService.serviceName}
+                  onChange={(e) => setNewService({...newService, serviceName: e.target.value})}
+                  placeholder="e.g., New Microservice"
+                />
+              </div>
+              <div className="form-group">
+                <label>Endpoint:</label>
+                <input
+                  type="text"
+                  value={newService.endpoint}
+                  onChange={(e) => setNewService({...newService, endpoint: e.target.value})}
+                  placeholder="e.g., /api/v1/new-service"
+                />
+              </div>
+              <div className="form-group">
+                <label>Provider:</label>
+                <input
+                  type="text"
+                  value={newService.provider}
+                  onChange={(e) => setNewService({...newService, provider: e.target.value})}
+                  placeholder="e.g., Internal"
+                />
+              </div>
+              <div className="form-group">
+                <label>Version:</label>
+                <input
+                  type="text"
+                  value={newService.version}
+                  onChange={(e) => setNewService({...newService, version: e.target.value})}
+                  placeholder="e.g., 1.0.0"
+                />
+              </div>
+              <div className="form-group">
+                <label>Environment:</label>
+                <select
+                  value={newService.environment}
+                  onChange={(e) => setNewService({...newService, environment: e.target.value})}
+                >
+                  <option value="production">Production</option>
+                  <option value="staging">Staging</option>
+                  <option value="development">Development</option>
+                </select>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button 
+                className="btn btn-secondary" 
+                onClick={() => setShowServiceModal(false)}
+              >
+                Cancel
+              </button>
+              <button 
+                className="btn btn-primary" 
+                onClick={handleAddService}
+                disabled={!newService.serviceId || !newService.serviceName || !newService.endpoint}
+              >
+                Add Service
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

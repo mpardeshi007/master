@@ -25,7 +25,7 @@ A comprehensive financial management platform built with Spring Boot backend and
 The application creates the following test users on startup:
 
 - **Username**: `user`, **Password**: `password`, **Role**: USER
-- **Username**: `admin`, **Password**: `admin`, **Roles**: ADMIN, USER  
+- **Username**: `admin`, **Password**: `password`, **Roles**: ADMIN, USER  
 - **Username**: `server`, **Password**: `server`, **Role**: SERVER
 
 ## Quick Start
@@ -179,7 +179,7 @@ The JWT tokens contain the following claims:
 ```bash
 curl -X POST http://localhost:8080/api/auth/signin \
   -H "Content-Type: application/json" \
-  -d '{"username":"user","password":"password"}'
+  -d '{"username":"admin","password":"password"}'
 ```
 
 ### 2. Use Token to Access Protected Endpoint
